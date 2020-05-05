@@ -1,3 +1,4 @@
+colored
 lxml
 numpy
 pandas

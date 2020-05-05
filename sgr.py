@@ -5,6 +5,7 @@ import requests
 import time
 import xml.etree.ElementTree as ET 
 
+from colored import fg, attr
 from lxml import html
 import numpy as np
 import pandas as pd
@@ -219,7 +220,7 @@ if __name__ == '__main__':
     #sys.exit()
 
     # === Get User's Review Data ===
-    print('::  Getting user review data and gathering metadata...')
+    print(f'{fg("cyan")}::{attr("reset")}  Getting user review data and gathering metadata...')
     # Get Data
     df = pd.read_excel('~/gdrive/video_games/reviews/reviews_and_wishlist.xlsx', skiprows=2).set_index('Steam AppID')
     
@@ -254,14 +255,14 @@ if __name__ == '__main__':
             df.at[index, tag] = int(rank)
 
     # === Creating training dataframes ===
-    print('::  Creating training dataframes...')
+    print(f'{fg("cyan")}::{attr("reset")}  Creating training dataframes...')
     
     ids = df['Game']
     y = df['Score']
     X = df.drop(['Game', 'Score'], axis=1)
 
     # === Auto Hyperparam Tuning and Model training ===
-    print('::  Tuning hyperparameters and training recommender...')
+    print(f'{fg("cyan")}::{attr("reset")}  Tuning hyperparameters and training recommender...')
 
     n_estimators = [int(x) for x in np.linspace(start = 200, stop = 2000, num = 10)]
     max_depth = [int(x) for x in np.linspace(10, 110, num = 11)]
@@ -286,7 +287,7 @@ if __name__ == '__main__':
     print(f' MSE: {mean_squared_error(y, y_pred)}')
 
     # === Getting user library and wishlist games to generate recommendations ===
-    print('::  Getting user library and wishlist games to generate recommendations...')
+    print(f'{fg("cyan")}::{attr("reset")}  Getting user library and wishlist games to generate recommendations...')
     # Get Test Data
     df_test = pd.concat([get_library_df(), get_wishlist_df()])
     df_test = df_test.drop([str(x) for x in df.index.values])
@@ -307,7 +308,7 @@ if __name__ == '__main__':
                 pass
 
     # === Predicting test rank ===
-    print('::  Getting recommendations...')
+    print(f'{fg("cyan")}::{attr("reset")}  Getting recommendations...')
     df_test = df_test[df_test['Is DLC'] == False]  # Filter to games
 
     test_names = df_test['Game']
