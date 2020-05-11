@@ -3,16 +3,16 @@
 import json
 import requests
 import time
-import xml.etree.ElementTree as ET 
+import xml.etree.ElementTree as ET
 
 from colored import fg, attr
 from lxml import html
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import RandomizedSearchCV
 from tqdm import tqdm
+from xgboost import XGBRegressor
 
 # Globals
 WAIT_FOR_RESP_DOWNLOAD = 0.10
@@ -266,7 +266,6 @@ if __name__ == '__main__':
 
     n_estimators = [int(x) for x in np.linspace(start = 200, stop = 2000, num = 10)]
     max_depth = [int(x) for x in np.linspace(10, 110, num = 11)]
-    max_depth.append(None)
     min_samples_split = [2, 5, 10]
     min_samples_leaf = [1, 2, 4]
     bootstrap = [True, False]
@@ -275,12 +274,12 @@ if __name__ == '__main__':
                    'min_samples_split': min_samples_split,
                    'min_samples_leaf': min_samples_leaf,
                    'bootstrap': bootstrap}
-    model = RandomForestRegressor()
+    model = XGBRegressor(objective='reg:squarederror')
     rf_random = RandomizedSearchCV(estimator=model, param_distributions=random_grid, n_iter=100, cv=3, verbose=0, random_state=42, n_jobs=4)
     rf_random.fit(X, y)
 
     # Fit Model
-    model = RandomForestRegressor(**rf_random.best_params_, random_state=42)
+    model = XGBRegressor(objective='reg:squarederror', **rf_random.best_params_, random_state=42)
     model.fit(X, y)
     y_pred = model.predict(X)
 
