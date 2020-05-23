@@ -4,6 +4,7 @@ import json
 import requests
 import time
 import xml.etree.ElementTree as ET
+import warnings
 
 from colored import fg, attr
 from lxml import html
@@ -220,7 +221,7 @@ if __name__ == '__main__':
     #sys.exit()
 
     # === Get User's Review Data ===
-    print(f'{fg("cyan")}::{attr("reset")}  Getting user review data and gathering metadata...')
+    print(f'{fg("cyan")}::{attr("reset")}  Getting Steam user review data and gathering metadata...')
     # Get Data
     df = pd.read_excel('~/gdrive/video_games/reviews/reviews_and_wishlist.xlsx', skiprows=2).set_index('Steam AppID')
     
@@ -254,6 +255,36 @@ if __name__ == '__main__':
         for tag, rank in zip(tags, np.arange(len(tags), 0, -1)):
             df.at[index, tag] = int(rank)
 
+    # == Tags Pivot Summary ==
+    # Init tags dict
+    tags_score = {}
+    for tag in df.columns[4:]:
+        tags_score[tag] = {}
+        tags_score[tag]['Score'] = []
+        tags_score[tag]['All Percent'] = []
+
+    # Get tag scores
+    for i, row in df.iterrows():
+        # Get Top 5 tags for each game
+        tag_cols = row.index[4:]
+        top_5 = [tag for tag in tag_cols if row[tag] >= 15]
+
+        # Map reviews to top 5 tags
+        for tag in top_5:
+            tags_score[tag]['Score'] += [row['Score']]
+            tags_score[tag]['All Percent'] += [row['All Percent']]
+
+    # Abusing DataFrames here to take the mean of values in a column
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        df_tags = pd.DataFrame(tags_score).T
+        df_tags['Score'] = [np.round(np.array(x).mean(), 2) for x in df_tags['Score'].values]
+        df_tags['All Percent'] = [np.round(np.array(x).mean(), 2) for x in df_tags['All Percent'].values]
+        df_tags = df_tags.dropna().sort_values(by='Score', ascending=False)
+
+    print(f' Your Tags Sorted By Score')
+    print(df_tags)
+    
     # === Creating training dataframes ===
     print(f'{fg("cyan")}::{attr("reset")}  Creating training dataframes...')
     
@@ -286,7 +317,7 @@ if __name__ == '__main__':
     print(f' MSE: {mean_squared_error(y, y_pred)}')
 
     # === Getting user library and wishlist games to generate recommendations ===
-    print(f'{fg("cyan")}::{attr("reset")}  Getting user library and wishlist games to generate recommendations...')
+    print(f'{fg("cyan")}::{attr("reset")}  Getting Steam user library and wishlist games to generate recommendations...')
     # Get Test Data
     df_test = pd.concat([get_library_df(), get_wishlist_df()])
     df_test = df_test.drop([str(x) for x in df.index.values])
