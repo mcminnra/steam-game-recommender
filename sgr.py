@@ -10,6 +10,7 @@ from colored import fg, attr
 from lxml import html
 import numpy as np
 import pandas as pd
+import shap
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import RandomizedSearchCV
 from tqdm import tqdm
@@ -17,6 +18,7 @@ from xgboost import XGBRegressor
 
 # Globals
 WAIT_FOR_RESP_DOWNLOAD = 0.10
+NUM_OF_TAGS = 10
 
 
 def get_steam_app_info(appid):
@@ -59,7 +61,7 @@ def get_steam_store_html(appid):
 
 def get_appid_tags(appid):
     """
-    Gets the 10 app tags from a Steam Store Page
+    Gets the app tags from a Steam Store Page
 
     Parameters
     ----------
@@ -216,10 +218,6 @@ def get_library_df():
     
 
 if __name__ == '__main__':
-    #print(json.loads(requests.get(f'https://store.steampowered.com/api/appdetails/?appids=774461').text))
-    #import sys
-    #sys.exit()
-
     # === Get User's Review Data ===
     print(f'{fg("cyan")}::{attr("reset")}  Getting Steam user review data and gathering metadata...')
     # Get Data
@@ -239,7 +237,7 @@ if __name__ == '__main__':
     # Get Tags
     tags_dict = {}
     for index in tqdm(df.index.values, desc=' Getting train tags'):
-        tags = get_appid_tags(index)
+        tags = get_appid_tags(index)[:NUM_OF_TAGS]  # Get only first ten
         tags_dict[index] = tags
             
     UNIQUE_TAGS= sorted(list(set().union(*list(tags_dict.values()))))
@@ -267,23 +265,12 @@ if __name__ == '__main__':
     for i, row in df.iterrows():
         # Get Top 5 tags for each game
         tag_cols = row.index[4:]
-        top_5 = [tag for tag in tag_cols if row[tag] >= 15]
+        top_5 = [tag for tag in tag_cols if row[tag] >= 5]
 
         # Map reviews to top 5 tags
         for tag in top_5:
             tags_score[tag]['Score'] += [row['Score']]
             tags_score[tag]['All Percent'] += [row['All Percent']]
-
-    # Abusing DataFrames here to take the mean of values in a column
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", category=RuntimeWarning)
-        df_tags = pd.DataFrame(tags_score).T
-        df_tags['Score'] = [np.round(np.array(x).mean(), 2) for x in df_tags['Score'].values]
-        df_tags['All Percent'] = [np.round(np.array(x).mean(), 2) for x in df_tags['All Percent'].values]
-        df_tags = df_tags.dropna().sort_values(by='Score', ascending=False)
-
-    print(f' Your Tags Sorted By Score')
-    print(df_tags)
     
     # === Creating training dataframes ===
     print(f'{fg("cyan")}::{attr("reset")}  Creating training dataframes...')
@@ -310,7 +297,7 @@ if __name__ == '__main__':
     rf_random.fit(X, y)
 
     # Fit Model
-    model = XGBRegressor(objective='reg:squarederror', **rf_random.best_params_, random_state=42)
+    model = XGBRegressor(objective='reg:squarederror', **rf_random.best_params_, random_state=42, verbose=0)
     model.fit(X, y)
     y_pred = model.predict(X)
 
@@ -328,7 +315,7 @@ if __name__ == '__main__':
 
     # Get tag ranks for tags that exist in model input
     for index in tqdm(df_test.index.values, desc=' Getting test tags and mapping to train tag inputs'):
-        tags = get_appid_tags(index)
+        tags = get_appid_tags(index)[:NUM_OF_TAGS]  # Get only first ten
     
         for tag, rank in zip(tags, np.arange(len(tags), 0, -1)):
             if tag in UNIQUE_TAGS:
@@ -337,15 +324,35 @@ if __name__ == '__main__':
                 #print(f'tag "{tag}" not in input -- ignoring')
                 pass
 
-    # === Predicting test rank ===
-    print(f'{fg("cyan")}::{attr("reset")}  Getting recommendations...')
+    # === Analysis and Recommendations ===
+    print(f'{fg("cyan")}::{attr("reset")}  Getting analysis and recommendations...')
+    # Get X Test df
     df_test = df_test[df_test['Is DLC'] == False]  # Filter to games
-
     test_names = df_test['Game']
     test_owned = df_test['Is Owned']
     X_test = df_test.drop(['Game', 'Is Owned', 'Is DLC'], axis=1)
+
+   # use shap explainer to pull most important features influencing preds
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(X_test)
+    df_shap = pd.DataFrame(shap_values, columns=X_test.columns)
+    df_shap.index = X_test.index
+    shap_mean_values = df_shap.abs().mean().sort_values(ascending=False).round(3)
+    shap_mean_values = shap_mean_values[shap_mean_values!=0]
+
+    print('\n== Most Impactful Features ==')
+    print(shap_mean_values)        
+    
+    # Get predictions
     test_preds = model.predict(X_test)
 
+    # Get Top features
+    top_features_dict = {}
+    for i, row in df_shap.iterrows():
+        top_features = row.abs().sort_values(ascending=False)
+        top_features = top_features[top_features >= 0.01].index.values
+        top_features_dict[test_names[i]] = row[top_features]
+    
     output_data = {
         'Game': test_names,
         'Is Owned': test_owned,
@@ -353,7 +360,37 @@ if __name__ == '__main__':
     }
     output_df = pd.DataFrame(output_data).sort_values('Predicted Score', ascending=False)
 
-    print('\n== Top 25 ==')
-    print(output_df.head(25))
-    print('\n== Bottom 25 ==')
-    print(output_df.tail(25))
+    print('\n== Top 10 Recommended Games ==')
+    print()
+    for game_index, row in output_df.head(10).iterrows():
+        print(row['Game'])
+        print(f'Owned: {row["Is Owned"]}')
+        print(f'Predicted Rating: {row["Predicted Score"]:0.2f}')
+        print()
+
+        # Get most impactful tags
+        shap_features = top_features_dict[row['Game']]
+        tags_attr = []
+        for tag_index, value in zip(shap_features.index, shap_features):
+            tags_attr.append([tag_index, X_test.loc[game_index, tag_index], value])
+        df_tags = pd.DataFrame(tags_attr, columns=['Tag', 'Tag Value', 'Tag Impact']).set_index('Tag')
+        print(df_tags)
+        print()
+    
+    print('\n== Bottom 10 Not-Recommended Games ==')
+    print()
+    for game_index, row in output_df.tail(10).iterrows():
+        print(row['Game'])
+        print(f'Owned: {row["Is Owned"]}')
+        print(f'Predicted Rating: {row["Predicted Score"]:0.2f}')
+        print()
+
+        # Get most impactful tags
+        shap_features = top_features_dict[row['Game']]
+        tags_attr = []
+        for tag_index, value in zip(shap_features.index, shap_features):
+            tags_attr.append([tag_index, X_test.loc[game_index, tag_index], value])
+        df_tags = pd.DataFrame(tags_attr, columns=['Tag', 'Tag Value', 'Tag Impact']).set_index('Tag')
+        print(df_tags)
+        print()
+    
