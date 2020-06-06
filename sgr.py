@@ -217,7 +217,7 @@ def get_library_df():
     return df
     
 
-if __name__ == '__main__':
+def recommend_games():
     # === Get User's Review Data ===
     print(f'{fg("cyan")}::{attr("reset")}  Getting Steam user review data and gathering metadata...')
     # Get Data
@@ -253,25 +253,6 @@ if __name__ == '__main__':
         for tag, rank in zip(tags, np.arange(len(tags), 0, -1)):
             df.at[index, tag] = int(rank)
 
-    # == Tags Pivot Summary ==
-    # Init tags dict
-    tags_score = {}
-    for tag in df.columns[4:]:
-        tags_score[tag] = {}
-        tags_score[tag]['Score'] = []
-        tags_score[tag]['All Percent'] = []
-
-    # Get tag scores
-    for i, row in df.iterrows():
-        # Get Top 5 tags for each game
-        tag_cols = row.index[4:]
-        top_5 = [tag for tag in tag_cols if row[tag] >= 5]
-
-        # Map reviews to top 5 tags
-        for tag in top_5:
-            tags_score[tag]['Score'] += [row['Score']]
-            tags_score[tag]['All Percent'] += [row['All Percent']]
-    
     # === Creating training dataframes ===
     print(f'{fg("cyan")}::{attr("reset")}  Creating training dataframes...')
     
@@ -297,7 +278,7 @@ if __name__ == '__main__':
     rf_random.fit(X, y)
 
     # Fit Model
-    model = XGBRegressor(objective='reg:squarederror', **rf_random.best_params_, random_state=42, verbose=0)
+    model = XGBRegressor(objective='reg:squarederror', **rf_random.best_params_, iid=True, random_state=42, verbose=0)
     model.fit(X, y)
     y_pred = model.predict(X)
 
@@ -360,6 +341,8 @@ if __name__ == '__main__':
     }
     output_df = pd.DataFrame(output_data).sort_values('Predicted Score', ascending=False)
 
+    print(f'Expected Value: {explainer.expected_value:0.2f}')
+
     print('\n== Top 10 Recommended Games ==')
     print()
     for game_index, row in output_df.head(10).iterrows():
@@ -393,4 +376,9 @@ if __name__ == '__main__':
         df_tags = pd.DataFrame(tags_attr, columns=['Tag', 'Tag Value', 'Tag Impact']).set_index('Tag')
         print(df_tags)
         print()
-    
+
+    return model, output_df, shap_values, X_test
+
+
+if __name__ == '__main__':
+    _, _, _, _ = recommend_games()
