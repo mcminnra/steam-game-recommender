@@ -219,9 +219,13 @@ def get_library_df():
 
 def recommend_games():
     # === Get User's Review Data ===
-    print(f'{fg("cyan")}::{attr("reset")}  Getting Steam user review data and gathering metadata...')
+    print(f'{fg("cyan")}::{attr("reset")}  Getting Steam user review data and gathering game metadata...')
     # Get Data
-    df = pd.read_excel('~/gdrive/video_games/reviews/reviews_and_wishlist.xlsx', skiprows=2).set_index('Steam AppID')
+    df = pd.read_excel('~/gdrive/video_games/reviews/reviews_and_wishlist.xlsx', skiprows=2)
+    df = df[df['Steam AppID'].notnull()]
+    df['Steam AppID'] = df['Steam AppID'].astype(int)
+    df = df.set_index('Steam AppID')
+    print(df)
     
     # Keep Relevant Cols from review excel
     df = df[['Game', 'Score']]
@@ -229,14 +233,14 @@ def recommend_games():
     # Add Reviews metadata cols
     df['Recent Percent'] = 0
     df['All Percent'] = 0
-    for index in tqdm(df.index, desc=' Getting train reviews'):
+    for index in tqdm(df.index, desc=' Getting train Steam Game recent and all review percentages'):
         recent_p, _, all_p, _ = get_appid_reviews(index)
         df.at[index, 'Recent Percent'] = recent_p
         df.at[index, 'All Percent'] = all_p
         
     # Get Tags
     tags_dict = {}
-    for index in tqdm(df.index.values, desc=' Getting train tags'):
+    for index in tqdm(df.index.values, desc=' Getting train Steam Game tags'):
         tags = get_appid_tags(index)[:NUM_OF_TAGS]  # Get only first ten
         tags_dict[index] = tags
             
@@ -247,14 +251,14 @@ def recommend_games():
         df[tag] = 0
                 
     # Map tag rank to df
-    for index, row in tqdm(df.iterrows(), desc=' Mapping tags to ranked training columns'):
+    for index, row in tqdm(df.iterrows(), desc=' Mapping tags to columns and ranking based on importance'):
         tags = tags_dict[index]
                     
         for tag, rank in zip(tags, np.arange(len(tags), 0, -1)):
             df.at[index, tag] = int(rank)
 
     # === Creating training dataframes ===
-    print(f'{fg("cyan")}::{attr("reset")}  Creating training dataframes...')
+    print(f'{fg("cyan")}::{attr("reset")}  Creating training set dataframes...')
     
     ids = df['Game']
     y = df['Score']
