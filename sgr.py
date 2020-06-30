@@ -18,7 +18,7 @@ from xgboost import XGBRegressor
 
 # Globals
 WAIT_FOR_RESP_DOWNLOAD = 0.10
-NUM_OF_TAGS = 10
+NUM_OF_TAGS = 5
 
 
 def get_steam_app_info(appid):
@@ -255,7 +255,8 @@ def recommend_games():
         tags = tags_dict[index]
                     
         for tag, rank in zip(tags, np.arange(len(tags), 0, -1)):
-            df.at[index, tag] = int(rank)
+            # df.at[index, tag] = int(rank)  # For Importance Ranking
+            df.at[index, tag] = 1  # Binary Has/Not Has Flag
 
     # === Creating training dataframes ===
     print(f'{fg("cyan")}::{attr("reset")}  Creating training set dataframes...')
@@ -304,7 +305,8 @@ def recommend_games():
     
         for tag, rank in zip(tags, np.arange(len(tags), 0, -1)):
             if tag in UNIQUE_TAGS:
-                df_test.at[index, tag] = int(rank)
+                # df_test.at[index, tag] = int(rank)  # For Importance Ranking
+                df_test.at[index, tag] = 1  # Binary Has/Not Has Flag
             else:
                 #print(f'tag "{tag}" not in input -- ignoring')
                 pass
