@@ -19,7 +19,21 @@ from xgboost import XGBRegressor
 # Globals
 WAIT_FOR_RESP_DOWNLOAD = 0.10
 NUM_OF_TAGS = 5
-
+TAGS_MAP = {
+    # Dark
+    'Dark Fantasy': 'Dark',
+    'Dark Humor': 'Dark',
+    # Golf
+    'Mini Golf': 'Golf',
+    # Turn-Based
+    'Turn-Based Combat': 'Turn-Based',
+    'Turn-Based Strategy': 'Turn-Based',
+    'Turn-Based Tactics': 'Turn-Based',
+    # Platformer
+    '3D Platformer': 'Platformer',
+    #Puzzle
+    'Puzzle Platformer': 'Puzzle',
+}
 
 def get_steam_app_info(appid):
     """
@@ -241,11 +255,14 @@ def recommend_games():
     # Get Tags
     tags_dict = {}
     for index in tqdm(df.index.values, desc=' Getting train Steam Game tags'):
-        tags = get_appid_tags(index)[:NUM_OF_TAGS]  # Get only first ten
-        tags_dict[index] = tags
+        tags = get_appid_tags(index)
+        tags = list(dict.fromkeys([TAGS_MAP[tag] if tag in TAGS_MAP.keys() else tag for tag in tags]))  # Map specific tags to more general ones
+        tags_dict[index] = tags[:NUM_OF_TAGS]
             
     UNIQUE_TAGS= sorted(list(set().union(*list(tags_dict.values()))))
-            
+    print('-- Unique Training Tags --')
+    print(UNIQUE_TAGS)
+    
     # Create tag columns
     for tag in UNIQUE_TAGS:
         df[tag] = 0
@@ -301,7 +318,9 @@ def recommend_games():
 
     # Get tag ranks for tags that exist in model input
     for index in tqdm(df_test.index.values, desc=' Getting test tags and mapping to train tag inputs'):
-        tags = get_appid_tags(index)[:NUM_OF_TAGS]  # Get only first ten
+        tags = get_appid_tags(index)
+        tags = list(dict.fromkeys([TAGS_MAP[tag] if tag in TAGS_MAP.keys() else tag for tag in tags]))  # Map specific tags to more general ones
+        tags = tags[:NUM_OF_TAGS]
     
         for tag, rank in zip(tags, np.arange(len(tags), 0, -1)):
             if tag in UNIQUE_TAGS:
