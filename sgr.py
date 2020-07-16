@@ -8,6 +8,7 @@ import warnings
 
 from colored import fg, attr
 from lxml import html
+import mord
 import numpy as np
 import pandas as pd
 import shap
@@ -18,7 +19,7 @@ from xgboost import XGBRegressor
 
 # Globals
 WAIT_FOR_RESP_DOWNLOAD = 0.10
-NUM_OF_TAGS = 5
+NUM_OF_TAGS = 20
 TAGS_MAP = {
     # Dark
     'Dark Fantasy': 'Dark',
@@ -272,8 +273,8 @@ def recommend_games():
         tags = tags_dict[index]
                     
         for tag, rank in zip(tags, np.arange(len(tags), 0, -1)):
-            # df.at[index, tag] = int(rank)  # For Importance Ranking
-            df.at[index, tag] = 1  # Binary Has/Not Has Flag
+            df.at[index, tag] = int(rank)  # For Importance Ranking
+            #df.at[index, tag] = 1  # Binary Has/Not Has Flag
 
     # === Creating training dataframes ===
     print(f'{fg("cyan")}::{attr("reset")}  Creating training set dataframes...')
@@ -285,22 +286,23 @@ def recommend_games():
     # === Auto Hyperparam Tuning and Model training ===
     print(f'{fg("cyan")}::{attr("reset")}  Tuning hyperparameters and training recommender...')
 
-    n_estimators = [int(x) for x in np.linspace(start = 200, stop = 2000, num = 10)]
-    max_depth = [int(x) for x in np.linspace(10, 110, num = 11)]
-    min_samples_split = [2, 5, 10]
-    min_samples_leaf = [1, 2, 4]
-    bootstrap = [True, False]
-    random_grid = {'n_estimators': n_estimators,
-                   'max_depth': max_depth,
-                   'min_samples_split': min_samples_split,
-                   'min_samples_leaf': min_samples_leaf,
-                   'bootstrap': bootstrap}
-    model = XGBRegressor(objective='reg:squarederror')
-    rf_random = RandomizedSearchCV(estimator=model, param_distributions=random_grid, n_iter=100, cv=3, verbose=0, random_state=42, n_jobs=4)
-    rf_random.fit(X, y)
+    #n_estimators = [int(x) for x in np.linspace(start = 200, stop = 2000, num = 10)]
+    #max_depth = [int(x) for x in np.linspace(10, 110, num = 11)]
+    #min_samples_split = [2, 5, 10]
+    #min_samples_leaf = [1, 2, 4]
+    #bootstrap = [True, False]
+    #random_grid = {'n_estimators': n_estimators,
+    #               'max_depth': max_depth,
+    #               'min_samples_split': min_samples_split,
+    #               'min_samples_leaf': min_samples_leaf,
+    #               'bootstrap': bootstrap}
+    #model = XGBRegressor(objective='reg:squarederror')
+    #rf_random = RandomizedSearchCV(estimator=model, param_distributions=random_grid, n_iter=100, cv=3, verbose=0, random_state=42, n_jobs=4)
+    #rf_random.fit(X, y)
 
     # Fit Model
-    model = XGBRegressor(objective='reg:squarederror', **rf_random.best_params_, iid=True, random_state=42, verbose=0)
+    #model = XGBRegressor(objective='reg:squarederror', **rf_random.best_params_, iid=True, random_state=42, verbose=0)
+    model = mord.OrdinalRidge()
     model.fit(X, y)
     y_pred = model.predict(X)
 
@@ -324,8 +326,8 @@ def recommend_games():
     
         for tag, rank in zip(tags, np.arange(len(tags), 0, -1)):
             if tag in UNIQUE_TAGS:
-                # df_test.at[index, tag] = int(rank)  # For Importance Ranking
-                df_test.at[index, tag] = 1  # Binary Has/Not Has Flag
+                df_test.at[index, tag] = int(rank)  # For Importance Ranking
+                #df_test.at[index, tag] = 1  # Binary Has/Not Has Flag
             else:
                 #print(f'tag "{tag}" not in input -- ignoring')
                 pass
@@ -339,7 +341,7 @@ def recommend_games():
     X_test = df_test.drop(['Game', 'Is Owned', 'Is DLC'], axis=1)
 
    # use shap explainer to pull most important features influencing preds
-    explainer = shap.TreeExplainer(model)
+    explainer = shap.LinearExplainer(model, X, feature_dependence="independent")
     shap_values = explainer.shap_values(X_test)
     df_shap = pd.DataFrame(shap_values, columns=X_test.columns)
     df_shap.index = X_test.index
