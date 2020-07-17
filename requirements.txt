@@ -1,7 +1,8 @@
 colored
 lxml
+mord
 numpy
 pandas
 scikit-learn
+shap
 tqdm
-xgboost

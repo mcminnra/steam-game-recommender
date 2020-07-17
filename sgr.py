@@ -13,19 +13,24 @@ import numpy as np
 import pandas as pd
 import shap
 from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import RandomizedSearchCV
+from sklearn.model_selection import GridSearchCV
 from tqdm import tqdm
-from xgboost import XGBRegressor
 
 # Globals
 WAIT_FOR_RESP_DOWNLOAD = 0.10
 NUM_OF_TAGS = 20
 TAGS_MAP = {
+    # Co-op
+    'Online Co-Op': 'Co-op',
+    'Local Co-Op': 'Co-op',
+    'Co-op Campaign': 'Co-op',
     # Dark
     'Dark Fantasy': 'Dark',
     'Dark Humor': 'Dark',
     # Golf
     'Mini Golf': 'Golf',
+    # Local Multiplayer
+    '4 Player Local': 'Local Multiplayer',
     # Turn-Based
     'Turn-Based Combat': 'Turn-Based',
     'Turn-Based Strategy': 'Turn-Based',
@@ -296,13 +301,17 @@ def recommend_games():
     #               'min_samples_split': min_samples_split,
     #               'min_samples_leaf': min_samples_leaf,
     #               'bootstrap': bootstrap}
-    #model = XGBRegressor(objective='reg:squarederror')
-    #rf_random = RandomizedSearchCV(estimator=model, param_distributions=random_grid, n_iter=100, cv=3, verbose=0, random_state=42, n_jobs=4)
-    #rf_random.fit(X, y)
+    alpha = [x for x in np.linspace(0, 5, num = 50)]
+    random_grid = {
+        'alpha': alpha
+    }
+    model = mord.OrdinalRidge()
+    search = GridSearchCV(estimator=model, param_grid=random_grid, cv=3, verbose=0, n_jobs=4)
+    search.fit(X, y)
 
     # Fit Model
     #model = XGBRegressor(objective='reg:squarederror', **rf_random.best_params_, iid=True, random_state=42, verbose=0)
-    model = mord.OrdinalRidge()
+    model = mord.OrdinalRidge(**search.best_params_)
     model.fit(X, y)
     y_pred = model.predict(X)
 
@@ -348,8 +357,8 @@ def recommend_games():
     shap_mean_values = df_shap.abs().mean().sort_values(ascending=False).round(3)
     shap_mean_values = shap_mean_values[shap_mean_values!=0]
 
-    print('\n== Most Impactful Features ==')
-    print(shap_mean_values)        
+    print('\n== Top 50 Impactful Features ==')
+    print(shap_mean_values.head(50))        
     
     # Get predictions
     test_preds = model.predict(X_test)
@@ -370,26 +379,14 @@ def recommend_games():
 
     print(f'Expected Value: {explainer.expected_value:0.2f}')
 
+    print('\n== All Games Predicted Score ==')
+    print()
+    for game_index, row in output_df.iterrows():
+        print(f'{row["Game"]} - {row["Predicted Score"]:0.2f}')
+
     print('\n== Top 10 Recommended Games ==')
     print()
     for game_index, row in output_df.head(10).iterrows():
-        print(row['Game'])
-        print(f'Owned: {row["Is Owned"]}')
-        print(f'Predicted Rating: {row["Predicted Score"]:0.2f}')
-        print()
-
-        # Get most impactful tags
-        shap_features = top_features_dict[row['Game']]
-        tags_attr = []
-        for tag_index, value in zip(shap_features.index, shap_features):
-            tags_attr.append([tag_index, X_test.loc[game_index, tag_index], value])
-        df_tags = pd.DataFrame(tags_attr, columns=['Tag', 'Tag Value', 'Tag Impact']).set_index('Tag')
-        print(df_tags)
-        print()
-    
-    print('\n== Bottom 10 Not-Recommended Games ==')
-    print()
-    for game_index, row in output_df.tail(10).iterrows():
         print(row['Game'])
         print(f'Owned: {row["Is Owned"]}')
         print(f'Predicted Rating: {row["Predicted Score"]:0.2f}')
