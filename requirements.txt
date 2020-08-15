@@ -1,8 +1,7 @@
-colored
 lxml
 mord
 numpy
 pandas
+rich
 scikit-learn
 shap
-tqdm

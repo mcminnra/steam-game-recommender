@@ -6,15 +6,19 @@ import time
 import xml.etree.ElementTree as ET
 import warnings
 
-from colored import fg, attr
 from lxml import html
 import mord
 import numpy as np
 import pandas as pd
+from rich import print
+from rich.columns import Columns
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import track
+from rich.table import Table
 import shap
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import GridSearchCV
-from tqdm import tqdm
 
 # Globals
 WAIT_FOR_RESP_DOWNLOAD = 0.10
@@ -189,7 +193,7 @@ def get_wishlist_df():
         'Is DLC': None
     }
     df = pd.DataFrame(data).set_index('AppID')
-    for index in tqdm(df.index, desc=' Getting wishlist metadata'):
+    for index in track(df.index, description='Getting Steam Wishlist Games and Metadata'):
         recent_p, _, all_p, _ = get_appid_reviews(index)
         df.at[index, 'Recent Percent'] = recent_p
         df.at[index, 'All Percent'] = all_p
@@ -228,7 +232,7 @@ def get_library_df():
         'Is DLC': None
     }
     df = pd.DataFrame(data).set_index('AppID')
-    for index in tqdm(df.index, desc=' Getting library metadata'):
+    for index in track(df.index, description='Getting Steam Library Games and Metadata'):
         recent_p, _, all_p, _ = get_appid_reviews(index)
         df.at[index, 'Recent Percent'] = recent_p
         df.at[index, 'All Percent'] = all_p
@@ -238,14 +242,31 @@ def get_library_df():
     
 
 def recommend_games():
+    # get print console
+    console = Console()
+    
     # === Get User's Review Data ===
-    print(f'{fg("cyan")}::{attr("reset")}  Getting Steam user review data and gathering game metadata...')
+    print(f'::  Getting Steam user review data and gathering game metadata...')
     # Get Data
     df = pd.read_excel('~/gdrive/video_games/reviews/reviews_and_wishlist.xlsx', skiprows=2)
     df = df[df['Steam AppID'].notnull()]
     df['Steam AppID'] = df['Steam AppID'].astype(int)
     df = df.set_index('Steam AppID')
-    print(df)
+
+    # Table - Rated Games
+    rated_games_table = Table(title="Rated Games", show_header=True, header_style="bold purple")
+    rated_games_table.add_column("Steam AppId", style="cyan")
+    rated_games_table.add_column("Game")
+    rated_games_table.add_column("Score", justify="right", style="bold")
+    for i, row in df.iterrows():
+        # Color according to score value
+        score_string = str(row.Score)
+        if row.Score > 5:
+            score_string = "[green]" + score_string
+        elif row.Score < 5:
+            score_string = "[red]" + score_string
+        rated_games_table.add_row(str(row.name), row.Game, score_string)
+    console.print(rated_games_table)
     
     # Keep Relevant Cols from review excel
     df = df[['Game', 'Score']]
@@ -253,28 +274,29 @@ def recommend_games():
     # Add Reviews metadata cols
     df['Recent Percent'] = 0
     df['All Percent'] = 0
-    for index in tqdm(df.index, desc=' Getting train Steam Game recent and all review percentages'):
+    for index in track(df.index, description='Getting Steam Recent and All Review Percentages for Rated Games'):
         recent_p, _, all_p, _ = get_appid_reviews(index)
         df.at[index, 'Recent Percent'] = recent_p
         df.at[index, 'All Percent'] = all_p
         
     # Get Tags
     tags_dict = {}
-    for index in tqdm(df.index.values, desc=' Getting train Steam Game tags'):
+    for index in track(df.index.values, description='Getting Steam Tags for Rated Games'):
         tags = get_appid_tags(index)
         tags = list(dict.fromkeys([TAGS_MAP[tag] if tag in TAGS_MAP.keys() else tag for tag in tags]))  # Map specific tags to more general ones
         tags_dict[index] = tags[:NUM_OF_TAGS]
-            
+
     UNIQUE_TAGS= sorted(list(set().union(*list(tags_dict.values()))))
-    print('-- Unique Training Tags --')
-    print(UNIQUE_TAGS)
+
+    # Panel - Unique Tags
+    print(Panel(Columns(UNIQUE_TAGS, equal=True), title="Unique Training Tags"))
     
     # Create tag columns
     for tag in UNIQUE_TAGS:
         df[tag] = 0
                 
     # Map tag rank to df
-    for index, row in tqdm(df.iterrows(), desc=' Mapping tags to columns and ranking based on importance'):
+    for index, row in track(df.iterrows(), description='Mapping tags to columns and ranking based on importance', total=len(df)):
         tags = tags_dict[index]
                     
         for tag, rank in zip(tags, np.arange(len(tags), 0, -1)):
@@ -282,14 +304,14 @@ def recommend_games():
             #df.at[index, tag] = 1  # Binary Has/Not Has Flag
 
     # === Creating training dataframes ===
-    print(f'{fg("cyan")}::{attr("reset")}  Creating training set dataframes...')
+    print(f'::  Creating training set dataframes...')
     
     ids = df['Game']
     y = df['Score']
     X = df.drop(['Game', 'Score'], axis=1)
 
     # === Auto Hyperparam Tuning and Model training ===
-    print(f'{fg("cyan")}::{attr("reset")}  Tuning hyperparameters and training recommender...')
+    print(f'::  Tuning hyperparameters and training recommender...')
 
     #n_estimators = [int(x) for x in np.linspace(start = 200, stop = 2000, num = 10)]
     #max_depth = [int(x) for x in np.linspace(10, 110, num = 11)]
@@ -318,7 +340,7 @@ def recommend_games():
     print(f' MSE: {mean_squared_error(y, y_pred)}')
 
     # === Getting user library and wishlist games to generate recommendations ===
-    print(f'{fg("cyan")}::{attr("reset")}  Getting Steam user library and wishlist games to generate recommendations...')
+    print(f'::  Getting Steam user library and wishlist games to generate recommendations...')
     # Get Test Data
     df_test = pd.concat([get_library_df(), get_wishlist_df()])
     df_test = df_test.drop([str(x) for x in df.index.values])
@@ -328,7 +350,7 @@ def recommend_games():
         df_test[tag] = 0
 
     # Get tag ranks for tags that exist in model input
-    for index in tqdm(df_test.index.values, desc=' Getting test tags and mapping to train tag inputs'):
+    for index in track(df_test.index.values, description='Getting test tags and mapping to train tag inputs'):
         tags = get_appid_tags(index)
         tags = list(dict.fromkeys([TAGS_MAP[tag] if tag in TAGS_MAP.keys() else tag for tag in tags]))  # Map specific tags to more general ones
         tags = tags[:NUM_OF_TAGS]
@@ -342,7 +364,7 @@ def recommend_games():
                 pass
 
     # === Analysis and Recommendations ===
-    print(f'{fg("cyan")}::{attr("reset")}  Getting analysis and recommendations...')
+    print(f'::  Getting analysis and recommendations...')
     # Get X Test df
     df_test = df_test[df_test['Is DLC'] == False]  # Filter to games
     test_names = df_test['Game']
@@ -357,8 +379,14 @@ def recommend_games():
     shap_mean_values = df_shap.abs().mean().sort_values(ascending=False).round(3)
     shap_mean_values = shap_mean_values[shap_mean_values!=0]
 
-    print('\n== Top 50 Impactful Features ==')
-    print(shap_mean_values.head(50))        
+    # Table - Top 50 Impactful Features
+    impactful_features_table = Table(title="Top 50 Impactful Features", show_header=True, header_style="bold purple")
+    impactful_features_table.add_column("Rank")
+    impactful_features_table.add_column("Feature")
+    impactful_features_table.add_column("Value", justify="right", style="cyan")
+    for i, (feature_name, val) in enumerate(zip(shap_mean_values.head(50).index, shap_mean_values.head(50))):        
+        impactful_features_table.add_row(str(i), feature_name, str(val))
+    console.print(impactful_features_table)
     
     # Get predictions
     test_preds = model.predict(X_test)
