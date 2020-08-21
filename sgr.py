@@ -7,7 +7,6 @@ import xml.etree.ElementTree as ET
 import warnings
 
 from lxml import html
-import mord
 import numpy as np
 import pandas as pd
 from rich import print
@@ -17,8 +16,8 @@ from rich.panel import Panel
 from rich.progress import track
 from rich.table import Table
 import shap
-from sklearn.metrics import mean_squared_error
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import GridSearchCV, cross_val_score
+from xgboost import XGBRegressor
 
 # Globals
 WAIT_FOR_RESP_DOWNLOAD = 0.10
@@ -261,9 +260,9 @@ def recommend_games():
     for i, row in df.iterrows():
         # Color according to score value
         score_string = str(row.Score)
-        if row.Score > 5:
+        if row.Score >= 7:
             score_string = "[green]" + score_string
-        elif row.Score < 5:
+        elif row.Score < 4:
             score_string = "[red]" + score_string
         rated_games_table.add_row(str(row.name), row.Game, score_string)
     console.print(rated_games_table)
@@ -296,7 +295,7 @@ def recommend_games():
         df[tag] = 0
                 
     # Map tag rank to df
-    for index, row in track(df.iterrows(), description='Mapping tags to columns and ranking based on importance', total=len(df)):
+    for index, row in track(df.iterrows(), description='Creating Tag columns and ranking based on importance', total=len(df)):
         tags = tags_dict[index]
                     
         for tag, rank in zip(tags, np.arange(len(tags), 0, -1)):
@@ -310,40 +309,56 @@ def recommend_games():
     y = df['Score']
     X = df.drop(['Game', 'Score'], axis=1)
 
+    # == Add Content Similarity Score ==
+    X_arr = X.drop(['Recent Percent', 'All Percent'], axis=1)
+    tag_columns = X_arr.columns
+    X_arr = X_arr.astype(float).values
+    y_arr = y.astype(float).values
+
+    # Get Pseudo Weighted Average by rating for items
+    for i in range(0, len(y_arr)):
+        X_arr[i] = X_arr[i] * y_arr[i]
+    u_profile = X_arr.sum(axis=0)
+    u_profile = (u_profile / np.sqrt(np.sum(u_profile**2)))*NUM_OF_TAGS
+    u_profile = pd.Series(u_profile, index=tag_columns)
+
+    # Get cosine sim between weighted average profile and X items
+    cosine_scores = []
+    for i, row in X.iterrows():
+        x = row[2:].values
+        sim = np.dot(u_profile.values, x)/(np.linalg.norm(u_profile.values)*np.linalg.norm(x))
+        sim = np.round(sim, 4)
+        cosine_scores.append(sim)
+    X['User Profile Similarity'] = cosine_scores
+
     # === Auto Hyperparam Tuning and Model training ===
     print(f'::  Tuning hyperparameters and training recommender...')
-
-    #n_estimators = [int(x) for x in np.linspace(start = 200, stop = 2000, num = 10)]
-    #max_depth = [int(x) for x in np.linspace(10, 110, num = 11)]
-    #min_samples_split = [2, 5, 10]
-    #min_samples_leaf = [1, 2, 4]
-    #bootstrap = [True, False]
-    #random_grid = {'n_estimators': n_estimators,
-    #               'max_depth': max_depth,
-    #               'min_samples_split': min_samples_split,
-    #               'min_samples_leaf': min_samples_leaf,
-    #               'bootstrap': bootstrap}
-    alpha = [x for x in np.linspace(0, 5, num = 50)]
+    objective = ['reg:squarederror']
+    max_depth = [int(x) for x in np.linspace(0, 15, num = 16) if x != 0]
+    n_estimators = [int(x) for x in np.linspace(start = 0, stop = 500, num = 501) if x != 0]
     random_grid = {
-        'alpha': alpha
+        'objective': objective,
+        'max_depth': max_depth,
+        'n_estimators': n_estimators,
     }
-    model = mord.OrdinalRidge()
-    search = GridSearchCV(estimator=model, param_grid=random_grid, cv=3, verbose=0, n_jobs=4)
+    model = XGBRegressor(random_state=42, verbosity=0, n_jobs=-1)
+    search = GridSearchCV(estimator=model, param_grid=random_grid, scoring='neg_mean_squared_error', cv=3, verbose=1, n_jobs=-1)
     search.fit(X, y)
+    print(search.best_params_)
 
     # Fit Model
-    #model = XGBRegressor(objective='reg:squarederror', **rf_random.best_params_, iid=True, random_state=42, verbose=0)
-    model = mord.OrdinalRidge(**search.best_params_)
+    model = XGBRegressor(**search.best_params_, random_state=42, verbosity=0, n_jobs=-1)
     model.fit(X, y)
-    y_pred = model.predict(X)
 
-    print(f' MSE: {mean_squared_error(y, y_pred)}')
+    # Get Cross Val Score
+    scores = cross_val_score(model, X, y, scoring='neg_mean_squared_error', cv=5)
+    print(f' Avg. MSE: {scores.mean():0.4f} (+/- {scores.std():0.4f})')
 
     # === Getting user library and wishlist games to generate recommendations ===
     print(f'::  Getting Steam user library and wishlist games to generate recommendations...')
     # Get Test Data
     df_test = pd.concat([get_library_df(), get_wishlist_df()])
-    df_test = df_test.drop([str(x) for x in df.index.values])
+    df_test = df_test.drop([str(x) for x in df.index.values], errors='ignore')
 
     # Grab model tag input
     for tag in UNIQUE_TAGS:
@@ -363,74 +378,55 @@ def recommend_games():
                 #print(f'tag "{tag}" not in input -- ignoring')
                 pass
 
-    # === Analysis and Recommendations ===
-    print(f'::  Getting analysis and recommendations...')
+    # === Recommendations ===
+    print(f'::  Getting recommendations...')
     # Get X Test df
     df_test = df_test[df_test['Is DLC'] == False]  # Filter to games
+    test_ids = df_test.index.values
     test_names = df_test['Game']
     test_owned = df_test['Is Owned']
     X_test = df_test.drop(['Game', 'Is Owned', 'Is DLC'], axis=1)
 
-   # use shap explainer to pull most important features influencing preds
-    explainer = shap.LinearExplainer(model, X, feature_dependence="independent")
-    shap_values = explainer.shap_values(X_test)
-    df_shap = pd.DataFrame(shap_values, columns=X_test.columns)
-    df_shap.index = X_test.index
-    shap_mean_values = df_shap.abs().mean().sort_values(ascending=False).round(3)
-    shap_mean_values = shap_mean_values[shap_mean_values!=0]
-
-    # Table - Top 50 Impactful Features
-    impactful_features_table = Table(title="Top 50 Impactful Features", show_header=True, header_style="bold purple")
-    impactful_features_table.add_column("Rank")
-    impactful_features_table.add_column("Feature")
-    impactful_features_table.add_column("Value", justify="right", style="cyan")
-    for i, (feature_name, val) in enumerate(zip(shap_mean_values.head(50).index, shap_mean_values.head(50))):        
-        impactful_features_table.add_row(str(i), feature_name, str(val))
-    console.print(impactful_features_table)
+    # Calculate User Profile Sim Scores
+    cosine_scores = []
+    for i, row in X_test.iterrows():
+        x = row[2:].astype(float).values
+        sim = np.dot(u_profile.values, x)/(np.linalg.norm(u_profile.values)*np.linalg.norm(x))
+        sim = np.round(sim, 4)
+        cosine_scores.append(sim)
+    X_test['User Profile Similarity'] = cosine_scores
     
     # Get predictions
     test_preds = model.predict(X_test)
 
-    # Get Top features
-    top_features_dict = {}
-    for i, row in df_shap.iterrows():
-        top_features = row.abs().sort_values(ascending=False)
-        top_features = top_features[top_features >= 0.01].index.values
-        top_features_dict[test_names[i]] = row[top_features]
-    
+    # Formulate Output
     output_data = {
+        'Steam AppId': test_ids,
         'Game': test_names,
         'Is Owned': test_owned,
+        'User Profile Similarity': X_test['User Profile Similarity'].values,
         'Predicted Score': test_preds
     }
     output_df = pd.DataFrame(output_data).sort_values('Predicted Score', ascending=False)
 
-    print(f'Expected Value: {explainer.expected_value:0.2f}')
-
-    print('\n== All Games Predicted Score ==')
-    print()
-    for game_index, row in output_df.iterrows():
-        print(f'{row["Game"]} - {row["Predicted Score"]:0.2f}')
-
-    print('\n== Top 10 Recommended Games ==')
-    print()
-    for game_index, row in output_df.head(10).iterrows():
-        print(row['Game'])
-        print(f'Owned: {row["Is Owned"]}')
-        print(f'Predicted Rating: {row["Predicted Score"]:0.2f}')
-        print()
-
-        # Get most impactful tags
-        shap_features = top_features_dict[row['Game']]
-        tags_attr = []
-        for tag_index, value in zip(shap_features.index, shap_features):
-            tags_attr.append([tag_index, X_test.loc[game_index, tag_index], value])
-        df_tags = pd.DataFrame(tags_attr, columns=['Tag', 'Tag Value', 'Tag Impact']).set_index('Tag')
-        print(df_tags)
-        print()
-
-    return model, output_df, shap_values, X_test
+    # Table - All Games Predicted Score
+    predicted_games_table = Table(title="Predicted Score for Steam Library and Wishlist Games", show_header=True, header_style="bold purple")
+    predicted_games_table.add_column("Steam AppId", style="cyan")
+    predicted_games_table.add_column("Game")
+    predicted_games_table.add_column("User Profile Similarity", justify="right", style="bold")
+    predicted_games_table.add_column("Predicted Score", justify="right", style="bold")
+    for i, row in output_df.iterrows():
+        # Color according to score value
+        score_string = str(np.round(row['Predicted Score'], 2))
+        if row['Predicted Score'] >= 7:
+            score_string = "[green]" + score_string
+        elif row['Predicted Score'] < 4:
+            score_string = "[red]" + score_string
+        predicted_games_table.add_row(row['Steam AppId'], row.Game, str(row['User Profile Similarity']), score_string)
+    console.print(predicted_games_table)
+        
+    return model, output_df, X_test
 
 
 if __name__ == '__main__':
-    _, _, _, _ = recommend_games()
+    _, _, _ = recommend_games()

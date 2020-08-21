@@ -1,0 +1,17 @@
+name: steam-game-recommender
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.8
+  - lxml
+  - numpy
+  - pandas
+  - requests
+  - rich
+  - scikit-learn
+  - shap
+  - xlrd
+  - pip
+  - pip:
+    - xgboost
