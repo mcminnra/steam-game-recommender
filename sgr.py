@@ -410,19 +410,29 @@ def recommend_games():
     output_df = pd.DataFrame(output_data).sort_values('Predicted Score', ascending=False)
 
     # Table - All Games Predicted Score
+    sim_mean = output_df['User Profile Similarity'].mean()
+    sim_std = output_df['User Profile Similarity'].std()
     predicted_games_table = Table(title="Predicted Score for Steam Library and Wishlist Games", show_header=True, header_style="bold purple")
     predicted_games_table.add_column("Steam AppId", style="cyan")
     predicted_games_table.add_column("Game")
     predicted_games_table.add_column("User Profile Similarity", justify="right", style="bold")
     predicted_games_table.add_column("Predicted Score", justify="right", style="bold")
     for i, row in output_df.iterrows():
-        # Color according to score value
+        # Color score value
         score_string = str(np.round(row['Predicted Score'], 2))
         if row['Predicted Score'] >= 7:
             score_string = "[green]" + score_string
         elif row['Predicted Score'] < 4:
             score_string = "[red]" + score_string
-        predicted_games_table.add_row(row['Steam AppId'], row.Game, str(row['User Profile Similarity']), score_string)
+
+        # Color Similarity
+        sim_string = f'{row["User Profile Similarity"]*100:0.2f}%'
+        if row['User Profile Similarity'] >= (sim_mean + sim_std):
+            sim_string = "[green]" + sim_string
+        elif row['User Profile Similarity'] <= (sim_mean - sim_std):
+            sim_string = "[red]" + sim_string
+        
+        predicted_games_table.add_row(row['Steam AppId'], row.Game, sim_string, score_string)
     console.print(predicted_games_table)
         
     return model, output_df, X_test
