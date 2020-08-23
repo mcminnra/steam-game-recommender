@@ -409,6 +409,15 @@ def recommend_games():
     }
     output_df = pd.DataFrame(output_data).sort_values('Predicted Score', ascending=False)
 
+    # Table - UProfile Tags
+    u_profile = u_profile.sort_values(ascending=False)
+    u_profile_table = Table(title="User Tags Profile", show_header=True, header_style="bold purple")
+    u_profile_table.add_column("Tag")
+    u_profile_table.add_column("Estimated Value", justify="right", style="bold")
+    for index, value in u_profile.items():
+        u_profile_table.add_row(index, f'{value:0.2f}')
+    console.print(u_profile_table)
+
     # Table - All Games Predicted Score
     sim_mean = output_df['User Profile Similarity'].mean()
     sim_std = output_df['User Profile Similarity'].std()
