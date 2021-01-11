@@ -97,7 +97,7 @@ def get_appid_tags(appid):
         list of tags in order of relevance
     """
     tree = get_steam_store_html(appid)
-    tags = [tag.strip() for tag in tree.xpath('//a[@class="app_tag "]/text()')]
+    tags = [tag.strip() for tag in tree.xpath('//a[@class="app_tag"]/text()')]
     return tags
 
 
