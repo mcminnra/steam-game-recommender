@@ -101,6 +101,25 @@ def get_appid_tags(appid):
     return tags
 
 
+def get_appid_developers(appid):
+    """
+    Gets the app developers from a Steam Store Page
+
+    Parameters
+    ----------
+    appid : int
+        Steam app's appid (i.e. every game has one. It's in the address bar of a game's store page)
+
+    Returns
+    -------
+    list
+        list of developers and publishers
+    """
+    tree = get_steam_store_html(appid)
+    devs = tree.xpath('//div[@id="developers_list"]/a/text()')
+    return devs
+
+
 def get_appid_reviews(appid):
     """
     Gets reviews (count and like%) from recent and all reviews on a steam store page
@@ -285,7 +304,14 @@ def recommend_games():
         tags = list(dict.fromkeys([TAGS_MAP[tag] if tag in TAGS_MAP.keys() else tag for tag in tags]))  # Map specific tags to more general ones
         tags_dict[index] = tags[:NUM_OF_TAGS]
 
+    # Get developers
+    devs_dict = {}
+    for index in track(df.index.values, description='Getting Steam Developers for Rated Games'):
+        devs_dict[index] = get_appid_developers(index)
+
+    # Get unique values lists
     UNIQUE_TAGS= sorted(list(set().union(*list(tags_dict.values()))))
+    UNIQUE_DEVS= sorted(list(set().union(*list(devs_dict.values()))))
 
     # Panel - Unique Tags
     print(Panel(Columns(UNIQUE_TAGS, equal=True), title="Unique Training Tags"))
@@ -296,11 +322,20 @@ def recommend_games():
                 
     # Map tag rank to df
     for index, row in track(df.iterrows(), description='Creating Tag columns and ranking based on importance', total=len(df)):
-        tags = tags_dict[index]
-                    
+        tags = tags_dict[index]        
         for tag, rank in zip(tags, np.arange(len(tags), 0, -1)):
             df.at[index, tag] = int(rank)  # For Importance Ranking
             #df.at[index, tag] = 1  # Binary Has/Not Has Flag
+
+    # Create dev columns
+    for dev in UNIQUE_DEVS:
+        df[dev] = 0
+                
+    # Map tag rank to df
+    for index, row in track(df.iterrows(), description='Creating Developer columns', total=len(df)):
+        devs = devs_dict[index]        
+        for dev in devs:
+            df.at[index, dev] = 1  # Binary Has/Not Has Flag
 
     # === Creating training dataframes ===
     print(f'::  Creating training set dataframes...')
@@ -375,7 +410,21 @@ def recommend_games():
                 df_test.at[index, tag] = int(rank)  # For Importance Ranking
                 #df_test.at[index, tag] = 1  # Binary Has/Not Has Flag
             else:
-                #print(f'tag "{tag}" not in input -- ignoring')
+                print(f'tag "{tag}" not in input -- ignoring')
+                pass
+
+    # Grab model dev input
+    for dev in UNIQUE_DEVS:
+        df_test[dev] = 0
+
+    # Get tag ranks for tags that exist in model input
+    for index in track(df_test.index.values, description='Getting test developers and mapping to train developer inputs'):
+        devs = get_appid_developers(index)
+        for dev in devs:
+            if dev in UNIQUE_DEVS:
+                df_test.at[index, dev] = 1  # Binary Has/Not Has Flag
+            else:
+                print(f'developer "{dev}" not in input -- ignoring')
                 pass
 
     # === Recommendations ===
